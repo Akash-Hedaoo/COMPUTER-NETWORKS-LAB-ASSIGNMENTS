@@ -1,5 +1,7 @@
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -13,59 +15,103 @@ struct LS_Request {
     int source_router;
 };
 
-int main(void) {
+int main() {
     int sock;
     struct sockaddr_in server_addr;
     struct LS_Request req;
     char ack;
 
-    /* Gather Network Topology */
-    printf("Enter number of routers (1-%d): ", MAX_VERTICES);
-    if (scanf("%d", &req.vertices) != 1 || req.vertices < 1 || req.vertices > MAX_VERTICES) {
-        fprintf(stderr, "Invalid number of routers.\n");
+    printf("Enter number of routers: ");
+    scanf("%d", &req.vertices);
+
+    if (req.vertices < 1 || req.vertices > MAX_VERTICES) {
+        printf("Invalid number of routers.\n");
         return 1;
     }
 
-    printf("Enter the adjacency matrix (-1 means no link, 0 on diagonal):\n");
     for (int i = 0; i < req.vertices; i++) {
         for (int j = 0; j < req.vertices; j++) {
-            if (scanf("%d", &req.graph[i][j]) != 1 || req.graph[i][j] < -1) {
-                fprintf(stderr, "Invalid link cost. Costs must be >= 0 or -1.\n");
-                return 1;
-            }
+            req.graph[i][j] = (i == j) ? 0 : -1;
         }
     }
 
-    printf("Enter source router (0-%d): ", req.vertices - 1);
-    if (scanf("%d", &req.source_router) != 1 || req.source_router < 0 || req.source_router >= req.vertices) {
-        fprintf(stderr, "Invalid source router.\n");
+    int links;
+    printf("Enter number of links: ");
+    scanf("%d", &links);
+
+    if (links < 0 || links > req.vertices * (req.vertices - 1) / 2) {
+        printf("Invalid number of links.\n");
         return 1;
     }
 
-    /* Socket Creation */
+    printf("Enter source destination cost for each link:\n");
+
+    for (int i = 0; i < links; i++) {
+        int src, dest, cost;
+
+        printf("Link %d: ", i + 1);
+        if (scanf("%d %d %d", &src, &dest, &cost) != 3 ||
+            src < 0 || src >= req.vertices ||
+            dest < 0 || dest >= req.vertices ||
+            src == dest || cost < 0) {
+            printf("Invalid link details.\n");
+            return 1;
+        }
+
+        req.graph[src][dest] = cost;
+        req.graph[dest][src] = cost;
+    }
+
+    printf("Enter source router: ");
+    scanf("%d", &req.source_router);
+
+    if (req.source_router < 0 ||
+        req.source_router >= req.vertices) {
+        printf("Invalid source router.\n");
+        return 1;
+    }
+
     sock = socket(AF_INET, SOCK_STREAM, 0);
+
     if (sock < 0) {
-        perror("Socket creation error");
+        perror("Socket creation failed");
         return 1;
     }
 
+    memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (connect(sock, (struct sockaddr *)&server_addr,
+                sizeof(server_addr)) < 0) {
         perror("Connection failed");
+        close(sock);
         return 1;
     }
 
-    /* Send Data to Server */
-    send(sock, &req, sizeof(req), 0);
+    size_t sent = 0;
 
-    /* Wait for server acknowledgment */
-    recv(sock, &ack, sizeof(ack), 0);
-    
-    printf("\nAdjacency matrix sent successfully!\n");
-    printf("Check the server console for the calculated OSPF routing table.\n");
+    while (sent < sizeof(req)) {
+        ssize_t n = send(sock, (char *)&req + sent,
+                         sizeof(req) - sent, 0);
+
+        if (n <= 0) {
+            perror("Send failed");
+            close(sock);
+            return 1;
+        }
+
+        sent += (size_t)n;
+    }
+
+    if (recv(sock, &ack, sizeof(ack), MSG_WAITALL) == sizeof(ack)
+        && ack == 'K') {
+        printf("\nNetwork topology sent successfully!\n");
+        printf("Check server terminal for routing table.\n");
+    } else {
+        printf("Acknowledgment not received.\n");
+    }
 
     close(sock);
     return 0;
