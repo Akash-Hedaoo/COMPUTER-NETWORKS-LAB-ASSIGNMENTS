@@ -41,7 +41,7 @@ int main(){
     size_t file_size;
     char filename[256];
 
-    if(recv(client_socket , &filename , sizeof(filename) , 0)<0){
+    if(recv(client_socket , &filename , sizeof(filename) , MSG_WAITALL)<0){
         perror("Error recieving the filename ");
         return 1;
     }
